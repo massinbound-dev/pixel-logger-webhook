@@ -14,16 +14,21 @@ const app = express();
 const GOOGLE_SHEET_ID = process.env.GOOGLE_SHEET_ID;
 const GOOGLE_SHEETS_CREDENTIALS = process.env.GOOGLE_SHEETS_CREDENTIALS;
 
-// NEW: Define the headers for your Google Sheet.
-// The order here MUST EXACTLY MATCH the order of columns in your sheet.
+// NEW: Define the complete list of headers for your Google Sheet.
+// The order and capitalization here MUST EXACTLY MATCH your sheet and requirements.
 const SHEET_HEADERS = [
-    'pixel_id', 'hem_sha256', 'event_timestamp', 'event_type', 'ip_address', 
-    'activity_start_date', 'activity_end_date', 'page_referrer', 'page_title', 'page_url',
-    'element_tag', 'element_text', 'element_href', 'first_name', 'last_name', 'gender',
-    'age_range', 'homeowner', 'married', 'children', 'income_range', 'net_worth',
-    'personal_address', 'personal_city', 'personal_state', 'personal_zip', 'personal_emails',
-    'mobile_phone', 'direct_number', 'company_name', 'company_domain', 'company_industry',
-    'job_title', 'linkedin_url', 'skiptrace_ip', 'skiptrace_exact_age', 'uuid'
+    'PixelID', 'HemSha256', 'EventTimestamp', 'EventType', 'IPAddress', 'ActivityStartDate', 'ActivityEndDate', 'ReferrerURL', 'UUID',
+    'FIRST_NAME', 'LAST_NAME', 'PERSONAL_ADDRESS', 'PERSONAL_CITY', 'PERSONAL_STATE', 'PERSONAL_ZIP', 'PERSONAL_ZIP4', 'AGE_RANGE', 'CHILDREN',
+    'GENDER', 'HOMEOWNER', 'MARRIED', 'NET_WORTH', 'INCOME_RANGE', 'DIRECT_NUMBER', 'DIRECT_NUMBER_DNC', 'MOBILE_PHONE', 'MOBILE_PHONE_DNC',
+    'PERSONAL_PHONE', 'PERSONAL_PHONE_DNC', 'BUSINESS_EMAIL', 'PERSONAL_EMAILS', 'DEEP_VERIFIED_EMAILS', 'SHA256_PERSONAL_EMAIL',
+    'SHA256_BUSINESS_EMAIL', 'JOB_TITLE', 'HEADLINE', 'DEPARTMENT', 'SENIORITY_LEVEL', 'INFERRED_YEARS_EXPERIENCE', 'COMPANY_NAME_HISTORY',
+    'JOB_TITLE_HISTORY', 'EDUCATION_HISTORY', 'COMPANY_ADDRESS', 'COMPANY_DESCRIPTION', 'COMPANY_DOMAIN', 'COMPANY_EMPLOYEE_COUNT',
+    'COMPANY_LINKEDIN_URL', 'COMPANY_NAME', 'COMPANY_PHONE', 'COMPANY_REVENUE', 'COMPANY_SIC', 'COMPANY_NAICS', 'COMPANY_CITY', 'COMPANY_STATE',
+    'COMPANY_ZIP', 'COMPANY_INDUSTRY', 'LINKEDIN_URL', 'TWITTER_URL', 'FACEBOOK_URL', 'SOCIAL_CONNECTIONS', 'SKILLS', 'INTERESTS',
+    'SKIPTRACE_MATCH_SCORE', 'SKIPTRACE_NAME', 'SKIPTRACE_ADDRESS', 'SKIPTRACE_CITY', 'SKIPTRACE_STATE', 'SKIPTRACE_ZIP',
+    'SKIPTRACE_LANDLINE_NUMBERS', 'SKIPTRACE_WIRELESS_NUMBERS', 'SKIPTRACE_CREDIT_RATING', 'SKIPTRACE_DNC', 'SKIPTRACE_EXACT_AGE',
+    'SKIPTRACE_ETHNIC_CODE', 'SKIPTRACE_LANGUAGE_CODE', 'SKIPTRACE_IP', 'SKIPTRACE_B2B_ADDRESS', 'SKIPTRACE_B2B_PHONE',
+    'SKIPTRACE_B2B_SOURCE', 'SKIPTRACE_B2B_WEBSITE'
 ];
 
 
@@ -48,16 +53,12 @@ async function appendToSheet(rows) {
             credentials: JSON.parse(GOOGLE_SHEETS_CREDENTIALS),
             scopes: 'https://www.googleapis.com/auth/spreadsheets',
         });
-
         const sheets = google.sheets({ version: 'v4', auth });
-        
         await sheets.spreadsheets.values.append({
             spreadsheetId: GOOGLE_SHEET_ID,
-            range: 'Sheet1!A1', // Assumes you're writing to a sheet named "Sheet1"
+            range: 'Sheet1!A1',
             valueInputOption: 'USER_ENTERED',
-            requestBody: {
-                values: rows, // Append all rows at once
-            },
+            requestBody: { values: rows },
         });
         console.log(`Successfully logged ${rows.length} row(s) to Google Sheet.`);
     } catch (error) {
@@ -70,7 +71,6 @@ async function appendToSheet(rows) {
 // --- THE MAIN WEBHOOK ROUTE ---
 const handleRequest = async (req, res) => {
     console.log('Pixel webhook received a request.');
-    
     const payload = req.body;
     console.log('Received payload:', JSON.stringify(payload, null, 2));
 
@@ -93,55 +93,99 @@ const handleRequest = async (req, res) => {
     const rowsToLog = [];
 
     for (const event of events) {
+        const resolution = event.resolution || {};
         const logData = {
-            // Top-level event data
-            pixel_id: get(event, 'pixel_id'),
-            hem_sha256: get(event, 'hem_sha256'),
-            event_timestamp: get(event, 'event_timestamp'),
-            event_type: get(event, 'event_type'),
-            ip_address: get(event, 'ip_address'),
-            activity_start_date: get(event, 'activity_start_date'),
-            activity_end_date: get(event, 'activity_end_date'),
-            
             // Event Data
-            page_referrer: get(event, 'event_data.referrer'),
-            page_title: get(event, 'event_data.title'),
-            page_url: get(event, 'event_data.url'),
-
-            // Element Data
-            element_tag: get(event, 'event_data.element.tag'),
-            element_text: get(event, 'event_data.element.text'),
-            element_href: get(event, 'event_data.element.attributes.href'),
+            PixelID: get(event, 'pixel_id'),
+            HemSha256: get(event, 'hem_sha256'),
+            EventTimestamp: get(event, 'event_timestamp'),
+            EventType: get(event, 'event_type'),
+            IPAddress: get(event, 'ip_address'),
+            ActivityStartDate: get(event, 'activity_start_date'),
+            ActivityEndDate: get(event, 'activity_end_date'),
+            ReferrerURL: get(event, 'referrer_url'),
+            UUID: get(resolution, 'UUID'),
 
             // Resolution Data (Personal)
-            first_name: get(event, 'resolution.FIRST_NAME'),
-            last_name: get(event, 'resolution.LAST_NAME'),
-            gender: get(event, 'resolution.GENDER'),
-            age_range: get(event, 'resolution.AGE_RANGE'),
-            homeowner: get(event, 'resolution.HOMEOWNER'),
-            married: get(event, 'resolution.MARRIED'),
-            children: get(event, 'resolution.CHILDREN'),
-            income_range: get(event, 'resolution.INCOME_RANGE'),
-            net_worth: get(event, 'resolution.NET_WORTH'),
-            personal_address: get(event, 'resolution.PERSONAL_ADDRESS'),
-            personal_city: get(event, 'resolution.PERSONAL_CITY'),
-            personal_state: get(event, 'resolution.PERSONAL_STATE'),
-            personal_zip: get(event, 'resolution.PERSONAL_ZIP'),
-            personal_emails: get(event, 'resolution.PERSONAL_EMAILS'),
-            mobile_phone: get(event, 'resolution.MOBILE_PHONE'),
-            direct_number: get(event, 'resolution.DIRECT_NUMBER'),
+            FIRST_NAME: get(resolution, 'FIRST_NAME'),
+            LAST_NAME: get(resolution, 'LAST_NAME'),
+            PERSONAL_ADDRESS: get(resolution, 'PERSONAL_ADDRESS'),
+            PERSONAL_CITY: get(resolution, 'PERSONAL_CITY'),
+            PERSONAL_STATE: get(resolution, 'PERSONAL_STATE'),
+            PERSONAL_ZIP: get(resolution, 'PERSONAL_ZIP'),
+            PERSONAL_ZIP4: get(resolution, 'PERSONAL_ZIP4'),
+            AGE_RANGE: get(resolution, 'AGE_RANGE'),
+            CHILDREN: get(resolution, 'CHILDREN'),
+            GENDER: get(resolution, 'GENDER'),
+            HOMEOWNER: get(resolution, 'HOMEOWNER'),
+            MARRIED: get(resolution, 'MARRIED'),
+            NET_WORTH: get(resolution, 'NET_WORTH'),
+            INCOME_RANGE: get(resolution, 'INCOME_RANGE'),
+            DIRECT_NUMBER: get(resolution, 'DIRECT_NUMBER'),
+            DIRECT_NUMBER_DNC: get(resolution, 'DIRECT_NUMBER_DNC'),
+            MOBILE_PHONE: get(resolution, 'MOBILE_PHONE'),
+            MOBILE_PHONE_DNC: get(resolution, 'MOBILE_PHONE_DNC'),
+            PERSONAL_PHONE: get(resolution, 'PERSONAL_PHONE'),
+            PERSONAL_PHONE_DNC: get(resolution, 'PERSONAL_PHONE_DNC'),
+            BUSINESS_EMAIL: get(resolution, 'BUSINESS_EMAIL'),
+            PERSONAL_EMAILS: get(resolution, 'PERSONAL_EMAILS'),
+            DEEP_VERIFIED_EMAILS: get(resolution, 'DEEP_VERIFIED_EMAILS'),
+            SHA256_PERSONAL_EMAIL: get(resolution, 'SHA256_PERSONAL_EMAIL'),
+            SHA256_BUSINESS_EMAIL: get(resolution, 'SHA256_BUSINESS_EMAIL'),
+
+            // Resolution Data (Professional)
+            JOB_TITLE: get(resolution, 'JOB_TITLE'),
+            HEADLINE: get(resolution, 'HEADLINE'),
+            DEPARTMENT: get(resolution, 'DEPARTMENT'),
+            SENIORITY_LEVEL: get(resolution, 'SENIORITY_LEVEL'),
+            INFERRED_YEARS_EXPERIENCE: get(resolution, 'INFERRED_YEARS_EXPERIENCE'),
+            COMPANY_NAME_HISTORY: get(resolution, 'COMPANY_NAME_HISTORY'),
+            JOB_TITLE_HISTORY: get(resolution, 'JOB_TITLE_HISTORY'),
+            EDUCATION_HISTORY: get(resolution, 'EDUCATION_HISTORY'),
 
             // Resolution Data (Company)
-            company_name: get(event, 'resolution.COMPANY_NAME'),
-            company_domain: get(event,- 'resolution.COMPANY_DOMAIN'),
-            company_industry: get(event, 'resolution.COMPANY_INDUSTRY'),
-            job_title: get(event, 'resolution.JOB_TITLE'),
-            linkedin_url: get(event, 'resolution.LINKEDIN_URL'),
-            
-            // Resolution Data (Skiptrace & Other)
-            skiptrace_ip: get(event, 'resolution.SKIPTRACE_IP'),
-            skiptrace_exact_age: get(event, 'resolution.SKIPTRACE_EXACT_AGE'),
-            uuid: get(event, 'resolution.UUID')
+            COMPANY_ADDRESS: get(resolution, 'COMPANY_ADDRESS'),
+            COMPANY_DESCRIPTION: get(resolution, 'COMPANY_DESCRIPTION'),
+            COMPANY_DOMAIN: get(resolution, 'COMPANY_DOMAIN'),
+            COMPANY_EMPLOYEE_COUNT: get(resolution, 'COMPANY_EMPLOYEE_COUNT'),
+            COMPANY_LINKEDIN_URL: get(resolution, 'COMPANY_LINKEDIN_URL'),
+            COMPANY_NAME: get(resolution, 'COMPANY_NAME'),
+            COMPANY_PHONE: get(resolution, 'COMPANY_PHONE'),
+            COMPANY_REVENUE: get(resolution, 'COMPANY_REVENUE'),
+            COMPANY_SIC: get(resolution, 'COMPANY_SIC'),
+            COMPANY_NAICS: get(resolution, 'COMPANY_NAICS'),
+            COMPANY_CITY: get(resolution, 'COMPANY_CITY'),
+            COMPANY_STATE: get(resolution, 'COMPANY_STATE'),
+            COMPANY_ZIP: get(resolution, 'COMPANY_ZIP'),
+            COMPANY_INDUSTRY: get(resolution, 'COMPANY_INDUSTRY'),
+
+            // Resolution Data (Social & Skills)
+            LINKEDIN_URL: get(resolution, 'LINKEDIN_URL'),
+            TWITTER_URL: get(resolution, 'TWITTER_URL'),
+            FACEBOOK_URL: get(resolution, 'FACEBOOK_URL'),
+            SOCIAL_CONNECTIONS: get(resolution, 'SOCIAL_CONNECTIONS'),
+            SKILLS: get(resolution, 'SKILLS'),
+            INTERESTS: get(resolution, 'INTERESTS'),
+
+            // Resolution Data (Skiptrace)
+            SKIPTRACE_MATCH_SCORE: get(resolution, 'SKIPTRACE_MATCH_SCORE'),
+            SKIPTRACE_NAME: get(resolution, 'SKIPTRACE_NAME'),
+            SKIPTRACE_ADDRESS: get(resolution, 'SKIPTRACE_ADDRESS'),
+            SKIPTRACE_CITY: get(resolution, 'SKIPTRACE_CITY'),
+            SKIPTRACE_STATE: get(resolution, 'SKIPTRACE_STATE'),
+            SKIPTRACE_ZIP: get(resolution, 'SKIPTRACE_ZIP'),
+            SKIPTRACE_LANDLINE_NUMBERS: get(resolution, 'SKIPTRACE_LANDLINE_NUMBERS'),
+            SKIPTRACE_WIRELESS_NUMBERS: get(resolution, 'SKIPTRACE_WIRELESS_NUMBERS'),
+            SKIPTRACE_CREDIT_RATING: get(resolution, 'SKIPTRACE_CREDIT_RATING'),
+            SKIPTRACE_DNC: get(resolution, 'SKIPTRACE_DNC'),
+            SKIPTRACE_EXACT_AGE: get(resolution, 'SKIPTRACE_EXACT_AGE'),
+            SKIPTRACE_ETHNIC_CODE: get(resolution, 'SKIPTRACE_ETHNIC_CODE'),
+            SKIPTRACE_LANGUAGE_CODE: get(resolution, 'SKIPTRACE_LANGUAGE_CODE'),
+            SKIPTRACE_IP: get(resolution, 'SKIPTRACE_IP'),
+            SKIPTRACE_B2B_ADDRESS: get(resolution, 'SKIPTRACE_B2B_ADDRESS'),
+            SKIPTRACE_B2B_PHONE: get(resolution, 'SKIPTRACE_B2B_PHONE'),
+            SKIPTRACE_B2B_SOURCE: get(resolution, 'SKIPTRACE_B2B_SOURCE'),
+            SKIPTRACE_B2B_WEBSITE: get(resolution, 'SKIPTRACE_B2B_WEBSITE')
         };
         
         const newRow = SHEET_HEADERS.map(header => logData[header] || '');
