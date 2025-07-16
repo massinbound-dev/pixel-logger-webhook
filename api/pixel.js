@@ -1,5 +1,5 @@
 // This is a Vercel Serverless Function that acts as a webhook endpoint for a tracking pixel.
-// It captures ALL incoming data from GET or POST requests and logs it to a Google Sheet.
+// It parses incoming JSON data and logs it to a Google Sheet with a structured column format.
 
 // File: /api/pixel.js
 
@@ -11,22 +11,35 @@ const app = express();
 
 // --- CONFIGURATION ---
 // Set these as Environment Variables in your Vercel project.
-
-// Google Sheets Configuration
 const GOOGLE_SHEET_ID = process.env.GOOGLE_SHEET_ID;
 const GOOGLE_SHEETS_CREDENTIALS = process.env.GOOGLE_SHEETS_CREDENTIALS;
 
+// NEW: Define the headers for your Google Sheet.
+// The order here MUST EXACTLY MATCH the order of columns in your sheet.
+const SHEET_HEADERS = [
+    'pixel_id', 'hem_sha256', 'event_timestamp', 'event_type', 'ip_address', 
+    'activity_start_date', 'activity_end_date', 'page_referrer', 'page_title', 'page_url',
+    'element_tag', 'element_text', 'element_href', 'first_name', 'last_name', 'gender',
+    'age_range', 'homeowner', 'married', 'children', 'income_range', 'net_worth',
+    'personal_address', 'personal_city', 'personal_state', 'personal_zip', 'personal_emails',
+    'mobile_phone', 'direct_number', 'company_name', 'company_domain', 'company_industry',
+    'job_title', 'linkedin_url', 'skiptrace_ip', 'skiptrace_exact_age', 'uuid'
+];
+
 
 // --- MIDDLEWARE ---
-// Use Express's built-in middleware to parse JSON and URL-encoded request bodies.
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 
 // --- HELPER FUNCTION FOR GOOGLE SHEETS ---
-async function appendToSheet(logData) {
+async function appendToSheet(rows) {
     if (!GOOGLE_SHEET_ID || !GOOGLE_SHEETS_CREDENTIALS) {
         console.log('Google Sheets credentials not configured. Skipping log.');
+        return;
+    }
+    if (rows.length === 0) {
+        console.log('No data to log. Skipping sheet append.');
         return;
     }
 
@@ -43,10 +56,10 @@ async function appendToSheet(logData) {
             range: 'Sheet1!A1', // Assumes you're writing to a sheet named "Sheet1"
             valueInputOption: 'USER_ENTERED',
             requestBody: {
-                values: [logData],
+                values: rows, // Append all rows at once
             },
         });
-        console.log('Successfully logged to Google Sheet.');
+        console.log(`Successfully logged ${rows.length} row(s) to Google Sheet.`);
     } catch (error) {
         console.error('--- FAILED TO LOG TO GOOGLE SHEET ---');
         console.error(error.message);
@@ -55,44 +68,92 @@ async function appendToSheet(logData) {
 
 
 // --- THE MAIN WEBHOOK ROUTE ---
-// This function will handle both GET and POST requests to /api/pixel
 const handleRequest = async (req, res) => {
     console.log('Pixel webhook received a request.');
     
-    // Combine all data from URL query parameters (for GET) and request body (for POST)
-    const allData = { ...req.query, ...req.body };
-    
-    console.log('Received data:', allData);
+    const payload = req.body;
+    console.log('Received payload:', JSON.stringify(payload, null, 2));
 
-    const timestamp = new Date().toISOString();
-    
-    // NEW LOGIC: Dynamically capture all data without predefined fields.
-    
-    // Use an 'event' field if it exists, otherwise provide a default.
-    const eventName = allData.event || 'PixelEvent';
-    
-    // Convert the entire data object into a JSON string to store in a single cell.
-    const fullDataString = JSON.stringify(allData);
+    const events = payload.events || [];
+    if (events.length === 0) {
+        console.log('Payload contained no events. Nothing to log.');
+        return res.status(204).send();
+    }
 
-    // Prepare the row to be logged to the Google Sheet.
-    // The order here should match the new columns in your sheet: Timestamp, EventName, FullData
-    const logRow = [
-        timestamp,
-        eventName,
-        fullDataString
-    ];
+    const get = (obj, path, defaultValue = '') => {
+        const keys = path.split('.');
+        let result = obj;
+        for (const key of keys) {
+            if (result === null || result === undefined) return defaultValue;
+            result = result[key];
+        }
+        return result === undefined ? defaultValue : result;
+    };
 
-    await appendToSheet(logRow);
+    const rowsToLog = [];
 
-    // For a pixel, it's common to send back a 204 No Content response,
-    // as the browser doesn't need to do anything with the response.
+    for (const event of events) {
+        const logData = {
+            // Top-level event data
+            pixel_id: get(event, 'pixel_id'),
+            hem_sha256: get(event, 'hem_sha256'),
+            event_timestamp: get(event, 'event_timestamp'),
+            event_type: get(event, 'event_type'),
+            ip_address: get(event, 'ip_address'),
+            activity_start_date: get(event, 'activity_start_date'),
+            activity_end_date: get(event, 'activity_end_date'),
+            
+            // Event Data
+            page_referrer: get(event, 'event_data.referrer'),
+            page_title: get(event, 'event_data.title'),
+            page_url: get(event, 'event_data.url'),
+
+            // Element Data
+            element_tag: get(event, 'event_data.element.tag'),
+            element_text: get(event, 'event_data.element.text'),
+            element_href: get(event, 'event_data.element.attributes.href'),
+
+            // Resolution Data (Personal)
+            first_name: get(event, 'resolution.FIRST_NAME'),
+            last_name: get(event, 'resolution.LAST_NAME'),
+            gender: get(event, 'resolution.GENDER'),
+            age_range: get(event, 'resolution.AGE_RANGE'),
+            homeowner: get(event, 'resolution.HOMEOWNER'),
+            married: get(event, 'resolution.MARRIED'),
+            children: get(event, 'resolution.CHILDREN'),
+            income_range: get(event, 'resolution.INCOME_RANGE'),
+            net_worth: get(event, 'resolution.NET_WORTH'),
+            personal_address: get(event, 'resolution.PERSONAL_ADDRESS'),
+            personal_city: get(event, 'resolution.PERSONAL_CITY'),
+            personal_state: get(event, 'resolution.PERSONAL_STATE'),
+            personal_zip: get(event, 'resolution.PERSONAL_ZIP'),
+            personal_emails: get(event, 'resolution.PERSONAL_EMAILS'),
+            mobile_phone: get(event, 'resolution.MOBILE_PHONE'),
+            direct_number: get(event, 'resolution.DIRECT_NUMBER'),
+
+            // Resolution Data (Company)
+            company_name: get(event, 'resolution.COMPANY_NAME'),
+            company_domain: get(event,- 'resolution.COMPANY_DOMAIN'),
+            company_industry: get(event, 'resolution.COMPANY_INDUSTRY'),
+            job_title: get(event, 'resolution.JOB_TITLE'),
+            linkedin_url: get(event, 'resolution.LINKEDIN_URL'),
+            
+            // Resolution Data (Skiptrace & Other)
+            skiptrace_ip: get(event, 'resolution.SKIPTRACE_IP'),
+            skiptrace_exact_age: get(event, 'resolution.SKIPTRACE_EXACT_AGE'),
+            uuid: get(event, 'resolution.UUID')
+        };
+        
+        const newRow = SHEET_HEADERS.map(header => logData[header] || '');
+        rowsToLog.push(newRow);
+    }
+
+    await appendToSheet(rowsToLog);
+
     res.status(204).send();
 };
 
-// Route requests for both GET and POST to the same handler
 app.get('/api/pixel', handleRequest);
 app.post('/api/pixel', handleRequest);
 
-
-// Export the app for Vercel
 module.exports = app;
