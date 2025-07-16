@@ -14,7 +14,7 @@ const app = express();
 const GOOGLE_SHEET_ID = process.env.GOOGLE_SHEET_ID;
 const GOOGLE_SHEETS_CREDENTIALS = process.env.GOOGLE_SHEETS_CREDENTIALS;
 
-// NEW: Define the complete list of headers for your Google Sheet.
+// Define the complete list of headers for your Google Sheet.
 // The order and capitalization here MUST EXACTLY MATCH your sheet and requirements.
 const SHEET_HEADERS = [
     'PixelID', 'HemSha256', 'EventTimestamp', 'EventType', 'IPAddress', 'ActivityStartDate', 'ActivityEndDate', 'ReferrerURL', 'UUID',
@@ -90,6 +90,14 @@ const handleRequest = async (req, res) => {
         return result === undefined ? defaultValue : result;
     };
 
+    // NEW: Helper function to format fields that might be misinterpreted by Google Sheets
+    const formatSheetCell = (value) => {
+        if (typeof value === 'string' && value.trim().startsWith('+')) {
+            return "'" + value; // Prepend single quote to treat as plain text
+        }
+        return value;
+    };
+
     const rowsToLog = [];
 
     for (const event of events) {
@@ -121,12 +129,15 @@ const handleRequest = async (req, res) => {
             MARRIED: get(resolution, 'MARRIED'),
             NET_WORTH: get(resolution, 'NET_WORTH'),
             INCOME_RANGE: get(resolution, 'INCOME_RANGE'),
-            DIRECT_NUMBER: get(resolution, 'DIRECT_NUMBER'),
+            
+            // UPDATED: Use the formatting helper for these specific phone fields
+            DIRECT_NUMBER: formatSheetCell(get(resolution, 'DIRECT_NUMBER')),
             DIRECT_NUMBER_DNC: get(resolution, 'DIRECT_NUMBER_DNC'),
-            MOBILE_PHONE: get(resolution, 'MOBILE_PHONE'),
+            MOBILE_PHONE: formatSheetCell(get(resolution, 'MOBILE_PHONE')),
             MOBILE_PHONE_DNC: get(resolution, 'MOBILE_PHONE_DNC'),
-            PERSONAL_PHONE: get(resolution, 'PERSONAL_PHONE'),
+            PERSONAL_PHONE: formatSheetCell(get(resolution, 'PERSONAL_PHONE')),
             PERSONAL_PHONE_DNC: get(resolution, 'PERSONAL_PHONE_DNC'),
+            
             BUSINESS_EMAIL: get(resolution, 'BUSINESS_EMAIL'),
             PERSONAL_EMAILS: get(resolution, 'PERSONAL_EMAILS'),
             DEEP_VERIFIED_EMAILS: get(resolution, 'DEEP_VERIFIED_EMAILS'),
