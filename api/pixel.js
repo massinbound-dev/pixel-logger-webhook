@@ -76,7 +76,12 @@ async function findGHLContact(email, phone) {
     if (!email && !phone) return null;
 
     try {
-        const response = await axios.get(`${GHL_API_BASE_URL}/contacts/lookup?email=${email || ''}&phone=${phone || ''}`, {
+        // Use URLSearchParams to handle encoding of parameters correctly
+        const params = new URLSearchParams();
+        if (email) params.append('email', email);
+        if (phone) params.append('phone', phone);
+
+        const response = await axios.get(`${GHL_API_BASE_URL}/contacts/lookup?${params.toString()}`, {
             headers: { 'Authorization': `Bearer ${GHL_API_KEY}` }
         });
         return response.data.contacts.length > 0 ? response.data.contacts[0] : null;
@@ -240,11 +245,15 @@ const handleRequest = async (req, res) => {
         const firstName = get(resolution, 'FIRST_NAME');
         const lastName = get(resolution, 'LAST_NAME');
         const email = get(resolution, 'PERSONAL_EMAILS', '').split(',')[0].trim();
-        const phone = get(resolution, 'MOBILE_PHONE', '').split(',')[0].trim();
+        
+        // UPDATED: Sanitize the phone number before using it in the API calls
+        const rawPhone = get(resolution, 'MOBILE_PHONE', '').split(',')[0].trim();
+        const sanitizedPhone = rawPhone.replace(/\D/g, '');
 
-        if (firstName && lastName && (email || phone)) {
+
+        if (firstName && lastName && (email || sanitizedPhone)) {
             console.log(`Qualified lead found: ${firstName} ${lastName}`);
-            const existingContact = await findGHLContact(email, phone);
+            const existingContact = await findGHLContact(email, sanitizedPhone);
 
             if (existingContact) {
                 console.log(`Contact already exists (ID: ${existingContact.id}). Adding a note.`);
@@ -256,7 +265,7 @@ const handleRequest = async (req, res) => {
                     firstName: firstName,
                     lastName: lastName,
                     email: email,
-                    phone: phone,
+                    phone: sanitizedPhone,
                     source: 'Pixel Tracker Webhook',
                     customField: {
                         // Example: 'net_worth_key_from_ghl': get(resolution, 'NET_WORTH'),
