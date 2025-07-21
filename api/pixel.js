@@ -1,21 +1,24 @@
 // This is a Vercel Serverless Function that acts as a webhook endpoint for a tracking pixel.
-// It parses incoming JSON data and logs it to a Google Sheet with a structured column format.
+// It parses incoming JSON data, logs it to a Google Sheet, and creates/updates contacts in a GoHighLevel CRM.
 
 // File: /api/pixel.js
 
 const express = require('express');
+const axios = require('axios'); // Add axios for making API requests
 const { GoogleAuth } = require('google-auth-library');
 const { google } = require('googleapis');
 
 const app = express();
 
 // --- CONFIGURATION ---
-// Set these as Environment Variables in your Vercel project.
 const GOOGLE_SHEET_ID = process.env.GOOGLE_SHEET_ID;
 const GOOGLE_SHEETS_CREDENTIALS = process.env.GOOGLE_SHEETS_CREDENTIALS;
 
-// Define the complete list of headers for your Google Sheet.
-// The order and capitalization here MUST EXACTLY MATCH your sheet and requirements.
+// GoHighLevel (Inbound Suite) Configuration
+const GHL_API_KEY = process.env.GHL_API_KEY;
+const GHL_API_BASE_URL = 'https://rest.gohighlevel.com/v1';
+
+// The exact headers for your Google Sheet.
 const SHEET_HEADERS = [
     'PixelID', 'HemSha256', 'EventTimestamp', 'EventType', 'IPAddress', 'ActivityStartDate', 'ActivityEndDate', 'ReferrerURL', 'UUID',
     'FIRST_NAME', 'LAST_NAME', 'PERSONAL_ADDRESS', 'PERSONAL_CITY', 'PERSONAL_STATE', 'PERSONAL_ZIP', 'PERSONAL_ZIP4', 'AGE_RANGE', 'CHILDREN',
@@ -34,10 +37,10 @@ const SHEET_HEADERS = [
 
 // --- MIDDLEWARE ---
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
 
-// --- HELPER FUNCTION FOR GOOGLE SHEETS ---
+// --- HELPER FUNCTIONS (Google Sheets & GHL) ---
+
 async function appendToSheet(rows) {
     if (!GOOGLE_SHEET_ID || !GOOGLE_SHEETS_CREDENTIALS) {
         console.log('Google Sheets credentials not configured. Skipping log.');
@@ -67,14 +70,59 @@ async function appendToSheet(rows) {
     }
 }
 
+// Function to search for a contact in GoHighLevel
+async function findGHLContact(email, phone) {
+    if (!GHL_API_KEY) return null;
+    if (!email && !phone) return null;
+
+    try {
+        const response = await axios.get(`${GHL_API_BASE_URL}/contacts/lookup?email=${email || ''}&phone=${phone || ''}`, {
+            headers: { 'Authorization': `Bearer ${GHL_API_KEY}` }
+        });
+        return response.data.contacts.length > 0 ? response.data.contacts[0] : null;
+    } catch (error) {
+        if (error.response && error.response.status !== 404) {
+            console.error('Error searching for GHL contact:', error.message);
+        }
+        return null;
+    }
+}
+
+// Function to create a contact in GoHighLevel
+async function createGHLContact(contactData) {
+    if (!GHL_API_KEY) return;
+    try {
+        const response = await axios.post(`${GHL_API_BASE_URL}/contacts/`, contactData, {
+            headers: { 'Authorization': `Bearer ${GHL_API_KEY}` }
+        });
+        console.log(`Successfully created GHL contact for ${contactData.email || contactData.phone}`);
+        return response.data.contact;
+    } catch (error) {
+        console.error('Error creating GHL contact:', error.message);
+        return null;
+    }
+}
+
+// Function to add a note to an existing GHL contact
+async function addGHLNote(contactId, note) {
+    if (!GHL_API_KEY) return;
+    try {
+        await axios.post(`${GHL_API_BASE_URL}/contacts/${contactId}/notes`, { body: note }, {
+            headers: { 'Authorization': `Bearer ${GHL_API_KEY}` }
+        });
+        console.log(`Successfully added note to GHL contact ${contactId}`);
+    } catch (error) {
+        console.error('Error adding note to GHL contact:', error.message);
+    }
+}
+
 
 // --- THE MAIN WEBHOOK ROUTE ---
 const handleRequest = async (req, res) => {
     console.log('Pixel webhook received a request.');
     const payload = req.body;
-    console.log('Received payload:', JSON.stringify(payload, null, 2));
-
     const events = payload.events || [];
+
     if (events.length === 0) {
         console.log('Payload contained no events. Nothing to log.');
         return res.status(204).send();
@@ -90,10 +138,9 @@ const handleRequest = async (req, res) => {
         return result === undefined ? defaultValue : result;
     };
 
-    // NEW: Helper function to format fields that might be misinterpreted by Google Sheets
     const formatSheetCell = (value) => {
         if (typeof value === 'string' && value.trim().startsWith('+')) {
-            return "'" + value; // Prepend single quote to treat as plain text
+            return "'" + value;
         }
         return value;
     };
@@ -102,8 +149,8 @@ const handleRequest = async (req, res) => {
 
     for (const event of events) {
         const resolution = event.resolution || {};
+        
         const logData = {
-            // Event Data
             PixelID: get(event, 'pixel_id'),
             HemSha256: get(event, 'hem_sha256'),
             EventTimestamp: get(event, 'event_timestamp'),
@@ -113,8 +160,6 @@ const handleRequest = async (req, res) => {
             ActivityEndDate: get(event, 'activity_end_date'),
             ReferrerURL: get(event, 'referrer_url'),
             UUID: get(resolution, 'UUID'),
-
-            // Resolution Data (Personal)
             FIRST_NAME: get(resolution, 'FIRST_NAME'),
             LAST_NAME: get(resolution, 'LAST_NAME'),
             PERSONAL_ADDRESS: get(resolution, 'PERSONAL_ADDRESS'),
@@ -129,22 +174,17 @@ const handleRequest = async (req, res) => {
             MARRIED: get(resolution, 'MARRIED'),
             NET_WORTH: get(resolution, 'NET_WORTH'),
             INCOME_RANGE: get(resolution, 'INCOME_RANGE'),
-            
-            // UPDATED: Use the formatting helper for these specific phone fields
             DIRECT_NUMBER: formatSheetCell(get(resolution, 'DIRECT_NUMBER')),
             DIRECT_NUMBER_DNC: get(resolution, 'DIRECT_NUMBER_DNC'),
             MOBILE_PHONE: formatSheetCell(get(resolution, 'MOBILE_PHONE')),
             MOBILE_PHONE_DNC: get(resolution, 'MOBILE_PHONE_DNC'),
             PERSONAL_PHONE: formatSheetCell(get(resolution, 'PERSONAL_PHONE')),
             PERSONAL_PHONE_DNC: get(resolution, 'PERSONAL_PHONE_DNC'),
-            
             BUSINESS_EMAIL: get(resolution, 'BUSINESS_EMAIL'),
             PERSONAL_EMAILS: get(resolution, 'PERSONAL_EMAILS'),
             DEEP_VERIFIED_EMAILS: get(resolution, 'DEEP_VERIFIED_EMAILS'),
             SHA256_PERSONAL_EMAIL: get(resolution, 'SHA256_PERSONAL_EMAIL'),
             SHA256_BUSINESS_EMAIL: get(resolution, 'SHA256_BUSINESS_EMAIL'),
-
-            // Resolution Data (Professional)
             JOB_TITLE: get(resolution, 'JOB_TITLE'),
             HEADLINE: get(resolution, 'HEADLINE'),
             DEPARTMENT: get(resolution, 'DEPARTMENT'),
@@ -153,8 +193,6 @@ const handleRequest = async (req, res) => {
             COMPANY_NAME_HISTORY: get(resolution, 'COMPANY_NAME_HISTORY'),
             JOB_TITLE_HISTORY: get(resolution, 'JOB_TITLE_HISTORY'),
             EDUCATION_HISTORY: get(resolution, 'EDUCATION_HISTORY'),
-
-            // Resolution Data (Company)
             COMPANY_ADDRESS: get(resolution, 'COMPANY_ADDRESS'),
             COMPANY_DESCRIPTION: get(resolution, 'COMPANY_DESCRIPTION'),
             COMPANY_DOMAIN: get(resolution, 'COMPANY_DOMAIN'),
@@ -169,16 +207,12 @@ const handleRequest = async (req, res) => {
             COMPANY_STATE: get(resolution, 'COMPANY_STATE'),
             COMPANY_ZIP: get(resolution, 'COMPANY_ZIP'),
             COMPANY_INDUSTRY: get(resolution, 'COMPANY_INDUSTRY'),
-
-            // Resolution Data (Social & Skills)
             LINKEDIN_URL: get(resolution, 'LINKEDIN_URL'),
             TWITTER_URL: get(resolution, 'TWITTER_URL'),
             FACEBOOK_URL: get(resolution, 'FACEBOOK_URL'),
             SOCIAL_CONNECTIONS: get(resolution, 'SOCIAL_CONNECTIONS'),
             SKILLS: get(resolution, 'SKILLS'),
             INTERESTS: get(resolution, 'INTERESTS'),
-
-            // Resolution Data (Skiptrace)
             SKIPTRACE_MATCH_SCORE: get(resolution, 'SKIPTRACE_MATCH_SCORE'),
             SKIPTRACE_NAME: get(resolution, 'SKIPTRACE_NAME'),
             SKIPTRACE_ADDRESS: get(resolution, 'SKIPTRACE_ADDRESS'),
@@ -201,10 +235,41 @@ const handleRequest = async (req, res) => {
         
         const newRow = SHEET_HEADERS.map(header => logData[header] || '');
         rowsToLog.push(newRow);
+
+        // --- GOHIGHLEVEL INTEGRATION LOGIC ---
+        const firstName = get(resolution, 'FIRST_NAME');
+        const lastName = get(resolution, 'LAST_NAME');
+        const email = get(resolution, 'PERSONAL_EMAILS', '').split(',')[0].trim();
+        const phone = get(resolution, 'MOBILE_PHONE', '').split(',')[0].trim();
+
+        if (firstName && lastName && (email || phone)) {
+            console.log(`Qualified lead found: ${firstName} ${lastName}`);
+            const existingContact = await findGHLContact(email, phone);
+
+            if (existingContact) {
+                console.log(`Contact already exists (ID: ${existingContact.id}). Adding a note.`);
+                const note = `Website activity detected. Event: ${get(event, 'event_type')}. URL: ${get(event, 'event_data.url', 'N/A')}. Timestamp: ${get(event, 'event_timestamp')}`;
+                await addGHLNote(existingContact.id, note);
+            } else {
+                console.log('Contact does not exist. Creating new contact.');
+                const newContactData = {
+                    firstName: firstName,
+                    lastName: lastName,
+                    email: email,
+                    phone: phone,
+                    source: 'Pixel Tracker Webhook',
+                    customField: {
+                        // Example: 'net_worth_key_from_ghl': get(resolution, 'NET_WORTH'),
+                    }
+                };
+                await createGHLContact(newContactData);
+            }
+        } else {
+            console.log('Event did not meet criteria for CRM entry (missing name, email, or phone).');
+        }
     }
 
     await appendToSheet(rowsToLog);
-
     res.status(204).send();
 };
 
