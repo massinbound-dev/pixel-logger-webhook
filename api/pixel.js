@@ -266,7 +266,7 @@ const handleRequest = async (req, res) => {
                     lastName: lastName,
                     email: email,
                     phone: sanitizedPhone,
-                    source: 'Pixel Tracker Webhook',
+                    source: 'Inbound Data',
                     customField: {
                         // Example: 'net_worth_key_from_ghl': get(resolution, 'NET_WORTH'),
                     }
